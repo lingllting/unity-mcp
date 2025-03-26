@@ -142,7 +142,7 @@ namespace UnityMCP.Editor.Commands
                 else
                 {
                     // Otherwise generate content based on template and parameters
-                    StringBuilder contentBuilder = new();
+                    StringBuilder contentBuilder = new StringBuilder();
 
                     // Add using directives
                     contentBuilder.AppendLine("using UnityEngine;");

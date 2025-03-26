@@ -251,7 +251,7 @@ namespace UnityMCP.Editor.Commands
         public static object FindObjectsByName(JObject @params)
         {
             string name = (string)@params["name"] ?? throw new Exception("Parameter 'name' is required.");
-            var objects = GameObject.FindObjectsByType<GameObject>(FindObjectsSortMode.None)
+            var objects = GameObject.FindObjectsOfType<GameObject>()
                 .Where(o => o.name.Contains(name))
                 .Select(o => new
                 {

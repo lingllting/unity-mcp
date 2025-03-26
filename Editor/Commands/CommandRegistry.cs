@@ -9,7 +9,7 @@ namespace UnityMCP.Editor.Commands
     /// </summary>
     public static class CommandRegistry
     {
-        private static readonly Dictionary<string, Func<JObject, object>> _handlers = new()
+        private static readonly Dictionary<string, Func<JObject, object>> _handlers = new Dictionary<string, Func<JObject, object>>()
         {
             // Scene management commands
             { "GET_SCENE_INFO", _ => SceneCommandHandler.GetSceneInfo() },

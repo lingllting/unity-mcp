@@ -7,8 +7,8 @@ namespace UnityMCP.Editor.Data
 {
     public class McpClients
     {
-        public List<McpClient> clients = new() {
-            new() {
+        public List<McpClient> clients = new List<McpClient> {
+            new McpClient {
                 name = "Claude Desktop",
                 windowsConfigPath = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -25,7 +25,7 @@ namespace UnityMCP.Editor.Data
                 mcpType = McpTypes.ClaudeDesktop,
                 configStatus = "Not Configured"
             },
-            new() {
+            new McpClient {
                 name = "Cursor",
                 windowsConfigPath = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),

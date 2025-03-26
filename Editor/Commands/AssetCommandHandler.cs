@@ -71,12 +71,12 @@ namespace UnityMCP.Editor.Commands
                 if (string.IsNullOrEmpty(prefabPath))
                     return new { success = false, error = "Prefab path cannot be empty" };
 
-                Vector3 position = new(
+                Vector3 position = new Vector3(
                     (float)@params["position_x"],
                     (float)@params["position_y"],
                     (float)@params["position_z"]
                 );
-                Vector3 rotation = new(
+                Vector3 rotation = new Vector3(
                     (float)@params["rotation_x"],
                     (float)@params["rotation_y"],
                     (float)@params["rotation_z"]
