@@ -47,7 +47,7 @@ namespace UnityMCP.Editor.Windows
                 "The automatic configuration failed. Please follow these steps:", EditorStyles.boldLabel);
             EditorGUILayout.Space(10);
 
-            GUIStyle instructionStyle = new(EditorStyles.wordWrappedLabel)
+            GUIStyle instructionStyle = new GUIStyle(EditorStyles.wordWrappedLabel)
             {
                 margin = new RectOffset(10, 10, 5, 5)
             };
@@ -81,7 +81,7 @@ namespace UnityMCP.Editor.Windows
             }
 
             // Prevent text overflow by allowing the text field to wrap
-            GUIStyle pathStyle = new(EditorStyles.textField)
+            GUIStyle pathStyle = new GUIStyle(EditorStyles.textField)
             {
                 wordWrap = true
             };
@@ -91,7 +91,7 @@ namespace UnityMCP.Editor.Windows
             // Copy button with improved styling
             EditorGUILayout.BeginHorizontal();
             GUILayout.FlexibleSpace();
-            GUIStyle copyButtonStyle = new(GUI.skin.button)
+            GUIStyle copyButtonStyle = new GUIStyle(GUI.skin.button)
             {
                 padding = new RectOffset(15, 15, 5, 5),
                 margin = new RectOffset(10, 10, 5, 5)
@@ -116,7 +116,7 @@ namespace UnityMCP.Editor.Windows
 
             if (pathCopied)
             {
-                GUIStyle feedbackStyle = new(EditorStyles.label);
+                GUIStyle feedbackStyle = new GUIStyle(EditorStyles.label);
                 feedbackStyle.normal.textColor = Color.green;
                 EditorGUILayout.LabelField("Copied!", feedbackStyle, GUILayout.Width(60));
             }
@@ -132,7 +132,7 @@ namespace UnityMCP.Editor.Windows
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
 
             // Improved text area for JSON with syntax highlighting colors
-            GUIStyle jsonStyle = new(EditorStyles.textArea)
+            GUIStyle jsonStyle = new GUIStyle(EditorStyles.textArea)
             {
                 font = EditorStyles.boldFont,
                 wordWrap = true
@@ -155,7 +155,7 @@ namespace UnityMCP.Editor.Windows
 
             if (jsonCopied)
             {
-                GUIStyle feedbackStyle = new(EditorStyles.label);
+                GUIStyle feedbackStyle = new GUIStyle(EditorStyles.label);
                 feedbackStyle.normal.textColor = Color.green;
                 EditorGUILayout.LabelField("Copied!", feedbackStyle, GUILayout.Width(60));
             }

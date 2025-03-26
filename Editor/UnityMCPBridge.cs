@@ -19,8 +19,8 @@ namespace UnityMCP.Editor
     {
         private static TcpListener listener;
         private static bool isRunning = false;
-        private static readonly object lockObj = new();
-        private static Dictionary<string, (string commandJson, TaskCompletionSource<string> tcs)> commandQueue = new();
+        private static readonly object lockObj = new object();
+        private static Dictionary<string, (string commandJson, TaskCompletionSource<string> tcs)> commandQueue = new Dictionary<string, (string, TaskCompletionSource<string>)>();
         private static readonly int unityPort = 6400;  // Hardcoded port
 
         public static bool IsRunning => isRunning;
@@ -132,7 +132,7 @@ namespace UnityMCP.Editor
 
         private static void ProcessCommands()
         {
-            List<string> processedIds = new();
+            List<string> processedIds = new List<string>();
             lock (lockObj)
             {
                 foreach (var kvp in commandQueue.ToList())

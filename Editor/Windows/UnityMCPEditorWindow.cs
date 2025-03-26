@@ -27,15 +27,9 @@ namespace UnityMCP.Editor.Windows
         private const int mcpPort = 6500;    // Hardcoded MCP port
         private const float CONNECTION_CHECK_INTERVAL = 2f; // Check every 2 seconds
         private float lastCheckTime = 0f;
-        private McpClients mcpClients = new();
+        private McpClients mcpClients = new McpClients();
 
-        private List<string> possiblePaths = new()
-        {
-            Path.GetFullPath(Path.Combine(Application.dataPath, "unity-mcp", "Python", "server.py")),
-            Path.GetFullPath(Path.Combine(Application.dataPath, "Packages", "com.justinpbarnett.unity-mcp", "Python", "server.py")),
-            Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Library", "PackageCache", "com.justinpbarnett.unity-mcp@*", "Python", "server.py")),
-            Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Packages", "com.justinpbarnett.unity-mcp", "Python", "server.py"))
-        };
+        private List<string> possiblePaths = new List<string>();        
 
         [MenuItem("Window/Unity MCP")]
         public static void ShowWindow()
@@ -45,6 +39,14 @@ namespace UnityMCP.Editor.Windows
 
         private void OnEnable()
         {
+            possiblePaths.Clear();
+            possiblePaths.AddRange(new List<string>
+            {
+                Path.GetFullPath(Path.Combine(Application.dataPath, "unity-mcp", "Python", "server.py")),
+                Path.GetFullPath(Path.Combine(Application.dataPath, "Packages", "com.justinpbarnett.unity-mcp", "Python", "server.py")),
+                Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Library", "PackageCache", "com.justinpbarnett.unity-mcp@*", "Python", "server.py")),
+                Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Packages", "com.justinpbarnett.unity-mcp", "Python", "server.py"))
+            });
             // Check initial states
             isUnityBridgeRunning = UnityMCPBridge.IsRunning;
             CheckPythonServerConnection();
@@ -196,12 +198,12 @@ namespace UnityMCP.Editor.Windows
             EditorGUILayout.Space(8);
 
             // Configure button with improved styling
-            GUIStyle buttonStyle = new(GUI.skin.button);
+            GUIStyle buttonStyle = new GUIStyle(GUI.skin.button);
             buttonStyle.padding = new RectOffset(15, 15, 5, 5);
             buttonStyle.margin = new RectOffset(10, 10, 5, 5);
 
             // Create muted button style for Manual Setup
-            GUIStyle mutedButtonStyle = new(buttonStyle);
+            GUIStyle mutedButtonStyle = new GUIStyle(buttonStyle);
 
             if (GUILayout.Button($"Auto Configure {mcpClient.name}", buttonStyle, GUILayout.Height(28)))
             {
@@ -236,8 +238,8 @@ namespace UnityMCP.Editor.Windows
 
         private void DrawStatusDot(Rect statusRect, Color statusColor)
         {
-            Rect dotRect = new(statusRect.x + 6, statusRect.y + 4, 12, 12);
-            Vector3 center = new(dotRect.x + dotRect.width / 2, dotRect.y + dotRect.height / 2, 0);
+            Rect dotRect = new Rect(statusRect.x + 6, statusRect.y + 4, 12, 12);
+            Vector3 center = new Vector3(dotRect.x + dotRect.width / 2, dotRect.y + dotRect.height / 2, 0);
             float radius = dotRect.width / 2;
 
             // Draw the main dot
@@ -245,7 +247,7 @@ namespace UnityMCP.Editor.Windows
             Handles.DrawSolidDisc(center, Vector3.forward, radius);
 
             // Draw the border
-            Color borderColor = new(statusColor.r * 0.7f, statusColor.g * 0.7f, statusColor.b * 0.7f);
+            Color borderColor = new Color(statusColor.r * 0.7f, statusColor.g * 0.7f, statusColor.b * 0.7f);
             Handles.color = borderColor;
             Handles.DrawWireDisc(center, Vector3.forward, radius);
         }
@@ -640,7 +642,7 @@ namespace UnityMCP.Editor.Windows
                 if (config?.mcpServers?.unityMCP != null)
                 {
                     string pythonDir = GetPythonDirectory(possiblePaths);
-                    if (pythonDir != null && Array.Exists(config.mcpServers.unityMCP.args, arg => arg.Contains(pythonDir, StringComparison.Ordinal)))
+                    if (pythonDir != null && config.mcpServers.unityMCP.args.Any(arg => arg.IndexOf(pythonDir, StringComparison.Ordinal) >= 0))
                     {
                         mcpClient.SetStatus(McpStatus.Configured);
                     }

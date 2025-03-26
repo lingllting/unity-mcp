@@ -92,7 +92,7 @@ namespace UnityMCP.Editor.Commands
                     return new { error = $"Unsupported platform: {platform}" };
                 }
 
-                BuildPlayerOptions buildPlayerOptions = new()
+                BuildPlayerOptions buildPlayerOptions = new BuildPlayerOptions
                 {
                     scenes = GetEnabledScenes(),
                     target = target,
