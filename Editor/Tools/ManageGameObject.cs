@@ -904,12 +904,10 @@ namespace UnityMCP.Editor.Tools
                     Type componentType = FindType(searchTerm);
                     if (componentType != null)
                     {
-                         // Determine FindObjectsInactive based on the searchInactive flag
-                         FindObjectsInactive findInactive = searchInactive ? FindObjectsInactive.Include : FindObjectsInactive.Exclude;
-                         // Replace FindObjectsOfType with FindObjectsByType, specifying the sorting mode and inactive state
+                         // Search based on searchInactive flag
                          var searchPoolComp = rootSearchObject 
                              ? rootSearchObject.GetComponentsInChildren(componentType, searchInactive).Select(c => (c as Component).gameObject) 
-                             : UnityEngine.Object.FindObjectsByType(componentType, findInactive, FindObjectsSortMode.None).Select(c => (c as Component).gameObject);
+                             : Resources.FindObjectsOfTypeAll(componentType).Where(c => searchInactive || (c as Component).gameObject.activeInHierarchy).Select(c => (c as Component).gameObject);
                          results.AddRange(searchPoolComp.Where(go => go != null)); // Ensure GO is valid
                     }
                     else { Debug.LogWarning($"[ManageGameObject.Find] Component type not found: {searchTerm}"); }
