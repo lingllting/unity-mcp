@@ -24,7 +24,11 @@ namespace MCPForUnity.Editor.Windows.Components.ClientConfig
     public class McpClientConfigSection
     {
         // UI Elements
+#if UNITY_2021_2_OR_NEWER
         private DropdownField clientDropdown;
+#else
+        private UnityEditor.UIElements.PopupField<string> clientDropdown;
+#endif
         private Button configureAllButton;
         private VisualElement clientStatusIndicator;
         private Label clientStatusLabel;
@@ -47,8 +51,8 @@ namespace MCPForUnity.Editor.Windows.Components.ClientConfig
 
         // Data
         private readonly List<IMcpClientConfigurator> configurators;
-        private readonly Dictionary<IMcpClientConfigurator, DateTime> lastStatusChecks = new();
-        private readonly HashSet<IMcpClientConfigurator> statusRefreshInFlight = new();
+        private readonly Dictionary<IMcpClientConfigurator, DateTime> lastStatusChecks = new Dictionary<IMcpClientConfigurator, DateTime>();
+        private readonly HashSet<IMcpClientConfigurator> statusRefreshInFlight = new HashSet<IMcpClientConfigurator>();
         private static readonly TimeSpan StatusRefreshInterval = TimeSpan.FromSeconds(45);
         private int selectedClientIndex = 0;
         private bool isSkillSyncInProgress;
@@ -79,7 +83,14 @@ namespace MCPForUnity.Editor.Windows.Components.ClientConfig
 
         private void CacheUIElements()
         {
+#if UNITY_2021_2_OR_NEWER
             clientDropdown = Root.Q<DropdownField>("client-dropdown");
+#else
+            // In Unity 2020.3, DropdownField doesn't exist in UXML.
+            // The UXML has a plain VisualElement placeholder; clientDropdown will be
+            // created as a PopupField<string> in InitializeUI().
+            clientDropdown = null;
+#endif
             configureAllButton = Root.Q<Button>("configure-all-button");
             clientStatusIndicator = Root.Q<VisualElement>("client-status-indicator");
             clientStatusLabel = Root.Q<Label>("client-status");
@@ -110,8 +121,35 @@ namespace MCPForUnity.Editor.Windows.Components.ClientConfig
             }
 
             var clientNames = configurators.Select(c => c.DisplayName).ToList();
+#if UNITY_2021_2_OR_NEWER
             clientDropdown.choices = clientNames;
-            if (clientNames.Count > 0)
+#else
+            // PopupField<string> in Unity 2020.3 doesn't expose a public .choices setter.
+            // The UXML contains a plain VisualElement placeholder since DropdownField
+            // doesn't exist in 2020.3. Find it and replace with a real PopupField.
+            {
+                var placeholder = Root.Q<VisualElement>("client-dropdown");
+                if (placeholder != null)
+                {
+                    var parent = placeholder.parent;
+                    int idx = parent.IndexOf(placeholder);
+                    parent.Remove(placeholder);
+                    clientDropdown = new UnityEditor.UIElements.PopupField<string>(clientNames, 0);
+                    clientDropdown.name = "client-dropdown";
+                    parent.Insert(idx, clientDropdown);
+                }
+                else if (clientDropdown != null)
+                {
+                    var parent = clientDropdown.parent;
+                    int idx = parent.IndexOf(clientDropdown);
+                    parent.Remove(clientDropdown);
+                    clientDropdown = new UnityEditor.UIElements.PopupField<string>(clientNames, 0);
+                    clientDropdown.name = "client-dropdown";
+                    parent.Insert(idx, clientDropdown);
+                }
+            }
+#endif
+            if (clientNames.Count > 0 && clientDropdown != null)
             {
                 // Restore last selected client from EditorPrefs
                 string lastClientId = EditorPrefs.GetString(EditorPrefKeys.LastSelectedClientId, string.Empty);
@@ -123,8 +161,10 @@ namespace MCPForUnity.Editor.Windows.Components.ClientConfig
                 selectedClientIndex = restoredIndex;
             }
 
-            claudeCliPathRow.style.display = DisplayStyle.None;
-            clientProjectDirRow.style.display = DisplayStyle.None;
+            if (claudeCliPathRow != null)
+                claudeCliPathRow.style.display = DisplayStyle.None;
+            if (clientProjectDirRow != null)
+                clientProjectDirRow.style.display = DisplayStyle.None;
 
             // Initialize the configuration display for the first selected client
             UpdateClientStatus();
@@ -571,7 +611,7 @@ namespace MCPForUnity.Editor.Windows.Components.ClientConfig
             {
                 var client = configurators[selectedClientIndex];
                 // Force immediate for non-Claude CLI, or when explicitly requested
-                bool shouldForceImmediate = forceImmediate || client is not ClaudeCliMcpConfigurator;
+                bool shouldForceImmediate = forceImmediate || !(client is ClaudeCliMcpConfigurator);
                 RefreshClientStatus(client, shouldForceImmediate);
                 UpdateManualConfiguration();
                 UpdateClaudeCliPathVisibility();
@@ -798,7 +838,20 @@ namespace MCPForUnity.Editor.Windows.Components.ClientConfig
             if (string.IsNullOrWhiteSpace(dropdownValue))
                 return -1;
 
-            int directIndex = clientDropdown.choices?.IndexOf(dropdownValue) ?? -1;
+            int directIndex = -1;
+#if UNITY_2021_2_OR_NEWER
+            directIndex = clientDropdown.choices?.IndexOf(dropdownValue) ?? -1;
+#else
+            // In Unity 2020.3, use configurators list directly for index lookup
+            for (int ci = 0; ci < configurators.Count; ci++)
+            {
+                if (configurators[ci].DisplayName == dropdownValue)
+                {
+                    directIndex = ci;
+                    break;
+                }
+            }
+#endif
             if (directIndex >= 0 && directIndex < configurators.Count)
                 return directIndex;
 

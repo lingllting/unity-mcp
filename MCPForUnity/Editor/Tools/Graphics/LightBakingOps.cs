@@ -150,7 +150,9 @@ namespace MCPForUnity.Editor.Tools.Graphics
                 ["indirectSampleCount"] = settings.indirectSampleCount,
                 ["environmentSampleCount"] = settings.environmentSampleCount,
                 ["mixedBakeMode"] = settings.mixedBakeMode.ToString(),
+#if UNITY_2021_1_OR_NEWER
                 ["lightmapCompression"] = settings.lightmapCompression.ToString(),
+#endif
                 ["ao"] = settings.ao,
                 ["aoMaxDistance"] = settings.aoMaxDistance
             };
@@ -509,6 +511,7 @@ namespace MCPForUnity.Editor.Tools.Graphics
                 case "compress_lightmaps":
                 case "lightmapcompression":
                 case "lightmap_compression":
+#if UNITY_2021_1_OR_NEWER
                     var strVal = value?.ToString() ?? "";
                     if (System.Enum.TryParse<LightmapCompression>(strVal, true, out var compression))
                         settings.lightmapCompression = compression;
@@ -520,6 +523,9 @@ namespace MCPForUnity.Editor.Tools.Graphics
                     else
                         return false;
                     return true;
+#else
+                    return false;
+#endif
 
                 case "ao":
                     settings.ao = ParamCoercion.CoerceBool(value, settings.ao);

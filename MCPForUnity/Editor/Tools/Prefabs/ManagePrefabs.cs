@@ -6,6 +6,9 @@ using MCPForUnity.Editor.Helpers;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.SceneManagement;
+#if !UNITY_2021_2_OR_NEWER
+using UnityEditor.Experimental.SceneManagement;
+#endif
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -418,9 +421,9 @@ namespace MCPForUnity.Editor.Tools.Prefabs
             string[] colorProps = { "_BaseColor", "_Color" };
             foreach (string prop in colorProps)
             {
-                if (mat.HasProperty(prop) && block.HasColor(prop))
+                if (mat.HasProperty(prop))
                 {
-                    mat.SetColor(prop, block.GetColor(prop));
+                    mat.SetColor(prop, block.GetColor(Shader.PropertyToID(prop)));
                 }
             }
         }
@@ -957,7 +960,7 @@ namespace MCPForUnity.Editor.Tools.Prefabs
                         continue;
                     }
 
-                    if (entry.Value is not JObject props || !props.HasValues)
+                    if (!(entry.Value is JObject props) || !props.HasValues)
                     {
                         continue;
                     }
@@ -1304,13 +1307,18 @@ namespace MCPForUnity.Editor.Tools.Prefabs
 
             try
             {
-                GameObject prefabAsset = AssetDatabase.LoadAssetAtPath<GameObject>(sanitizedPath);
+                var prefabAsset = AssetDatabase.LoadAssetAtPath<GameObject>(sanitizedPath);
                 if (prefabAsset == null)
                 {
                     return new ErrorResponse($"Prefab asset not found at '{sanitizedPath}'.");
                 }
 
+#if UNITY_2021_2_OR_NEWER
                 var prefabStage = PrefabStageUtility.OpenPrefab(sanitizedPath);
+#else
+                AssetDatabase.OpenAsset(prefabAsset);
+                var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
+#endif
                 bool enteredStage = prefabStage != null
                     && string.Equals(prefabStage.assetPath, sanitizedPath, StringComparison.OrdinalIgnoreCase)
                     && prefabStage.prefabContentsRoot != null;

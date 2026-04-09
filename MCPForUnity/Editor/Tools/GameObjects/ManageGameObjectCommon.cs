@@ -6,6 +6,9 @@ using MCPForUnity.Editor.Helpers;
 using MCPForUnity.Editor.Tools;
 using Newtonsoft.Json.Linq;
 using UnityEditor.SceneManagement;
+#if !UNITY_2021_2_OR_NEWER
+using UnityEditor.Experimental.SceneManagement;
+#endif
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -45,7 +48,7 @@ namespace MCPForUnity.Editor.Tools.GameObjects
             {
                 if (targetToken?.Type == JTokenType.Integer)
                     searchMethod = "by_id";
-                else if (!string.IsNullOrEmpty(searchTerm) && searchTerm.Contains('/'))
+                else if (!string.IsNullOrEmpty(searchTerm) && searchTerm.IndexOf('/') >= 0)
                     searchMethod = "by_path";
                 else
                     searchMethod = "by_name";

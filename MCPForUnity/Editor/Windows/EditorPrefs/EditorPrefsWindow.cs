@@ -326,8 +326,28 @@ namespace MCPForUnity.Editor.Windows
             var valueField = itemElement.Q<TextField>("value-field");
             valueField.value = item.Value;
 
+#if UNITY_2021_2_OR_NEWER
             var typeDropdown = itemElement.Q<DropdownField>("type-dropdown");
-            typeDropdown.index = (int)item.Type;
+#else
+            // In Unity 2020.3, DropdownField doesn't exist. The UXML has a plain VisualElement
+            // placeholder. Replace it with a PopupField<string>.
+            UnityEditor.UIElements.PopupField<string> typeDropdown = null;
+            {
+                var placeholder = itemElement.Q<VisualElement>("type-dropdown");
+                if (placeholder != null)
+                {
+                    var parent = placeholder.parent;
+                    int idx = parent.IndexOf(placeholder);
+                    parent.Remove(placeholder);
+                    typeDropdown = new UnityEditor.UIElements.PopupField<string>(
+                        new List<string> { "String", "Int", "Float", "Bool" }, 0);
+                    typeDropdown.name = "type-dropdown";
+                    parent.Insert(idx, typeDropdown);
+                }
+            }
+#endif
+            if (typeDropdown != null)
+                typeDropdown.index = (int)item.Type;
 
             // Buttons
             var saveButton = itemElement.Q<Button>("save-button");
@@ -341,7 +361,7 @@ namespace MCPForUnity.Editor.Windows
             }
 
             // Callbacks
-            saveButton.clicked += () => SavePref(item, valueField.value, (EditorPrefType)typeDropdown.index);
+            saveButton.clicked += () => SavePref(item, valueField.value, typeDropdown != null ? (EditorPrefType)typeDropdown.index : item.Type);
 
             return itemElement;
         }

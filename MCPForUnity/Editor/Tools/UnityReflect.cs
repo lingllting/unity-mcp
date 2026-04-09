@@ -15,8 +15,8 @@ namespace MCPForUnity.Editor.Tools
     public static class UnityReflect
     {
         private static Dictionary<string, Type[]> _assemblyTypeCache;
-        private static readonly object CacheLock = new();
-        private static readonly ConcurrentDictionary<Type, string[]> ExtensionMethodCache = new();
+        private static readonly object CacheLock = new object();
+        private static readonly ConcurrentDictionary<Type, string[]> ExtensionMethodCache = new ConcurrentDictionary<Type, string[]>();
 
         private static readonly string[] NamespacePrefixes =
         {
@@ -38,7 +38,7 @@ namespace MCPForUnity.Editor.Tools
             "UnityEngine.UIElements."
         };
 
-        private static readonly Dictionary<Type, string> FriendlyTypeNames = new()
+        private static readonly Dictionary<Type, string> FriendlyTypeNames = new Dictionary<Type, string>()
         {
             { typeof(void), "void" },
             { typeof(int), "int" },
@@ -144,7 +144,7 @@ namespace MCPForUnity.Editor.Tools
             string normalizedName = NormalizeGenericName(className);
 
             // Check for ambiguity first (only for short names without namespace)
-            if (!normalizedName.Contains('.') && !normalizedName.Contains('`'))
+            if (normalizedName.IndexOf('.') < 0 && normalizedName.IndexOf('`') < 0)
             {
                 var matches = FindAllTypesByShortName(normalizedName);
                 if (matches.Count > 1)
@@ -263,7 +263,7 @@ namespace MCPForUnity.Editor.Tools
             string memberName = memberResult.Value;
             string normalizedName = NormalizeGenericName(className);
 
-            if (!normalizedName.Contains('.') && !normalizedName.Contains('`'))
+            if (normalizedName.IndexOf('.') < 0 && normalizedName.IndexOf('`') < 0)
             {
                 var matches = FindAllTypesByShortName(normalizedName);
                 if (matches.Count > 1)

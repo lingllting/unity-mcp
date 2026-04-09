@@ -1,6 +1,8 @@
 using System;
 using System.IO;
+#if UNITY_2021_2_OR_NEWER
 using System.IO.Compression;
+#endif
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -32,6 +34,12 @@ namespace MCPForUnity.Editor.Setup
 
         public static void Install(bool interactive = true)
         {
+#if !UNITY_2021_2_OR_NEWER
+            string msg = "Roslyn installation requires Unity 2021.2 or newer (System.IO.Compression is not available in Unity 2020.3).";
+            Debug.LogWarning($"[MCP] {msg}");
+            if (interactive)
+                EditorUtility.DisplayDialog("Roslyn Not Available", msg, "OK");
+#else
             if (IsInstalled() && interactive)
             {
                 if (!EditorUtility.DisplayDialog(
@@ -119,8 +127,10 @@ namespace MCPForUnity.Editor.Setup
                         "OK");
                 }
             }
+#endif
         }
 
+#if UNITY_2021_2_OR_NEWER
         private static byte[] ExtractFileFromZip(byte[] zipBytes, string entryPath)
         {
             entryPath = entryPath.Replace('\\', '/');
@@ -144,5 +154,6 @@ namespace MCPForUnity.Editor.Setup
 
             return null;
         }
+#endif
     }
 }

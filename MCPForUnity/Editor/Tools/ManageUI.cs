@@ -16,7 +16,7 @@ namespace MCPForUnity.Editor.Tools
     [McpForUnityTool("manage_ui", AutoRegister = false, Group = "ui")]
     public static class ManageUI
     {
-        private static readonly HashSet<string> ValidExtensions = new(StringComparer.OrdinalIgnoreCase)
+        private static readonly HashSet<string> ValidExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             ".uxml", ".uss"
         };
@@ -26,10 +26,13 @@ namespace MCPForUnity.Editor.Tools
 
         static ManageUI()
         {
+#if UNITY_2021_2_OR_NEWER
             EditorApplication.quitting += CleanupRenderTextures;
             AssemblyReloadEvents.beforeAssemblyReload += CleanupRenderTextures;
+#endif
         }
 
+#if UNITY_2021_2_OR_NEWER
         private static void CleanupRenderTextures()
         {
             foreach (var kvp in s_panelRTs)
@@ -44,6 +47,7 @@ namespace MCPForUnity.Editor.Tools
             }
             s_panelRTs.Clear();
         }
+#endif
 
         public static object HandleCommand(JObject @params)
         {
@@ -70,19 +74,39 @@ namespace MCPForUnity.Editor.Tools
                         return UpdateFile(@params);
 
                     case "attach_ui_document":
+#if UNITY_2021_2_OR_NEWER
                         return AttachUIDocument(@params);
+#else
+                        return new ErrorResponse("attach_ui_document requires Unity 2021.2+");
+#endif
 
                     case "create_panel_settings":
+#if UNITY_2021_2_OR_NEWER
                         return CreatePanelSettings(@params);
+#else
+                        return new ErrorResponse("create_panel_settings requires Unity 2021.2+");
+#endif
 
                     case "update_panel_settings":
+#if UNITY_2021_2_OR_NEWER
                         return UpdatePanelSettings(@params);
+#else
+                        return new ErrorResponse("update_panel_settings requires Unity 2021.2+");
+#endif
 
                     case "get_visual_tree":
+#if UNITY_2021_2_OR_NEWER
                         return GetVisualTree(@params);
+#else
+                        return new ErrorResponse("get_visual_tree requires Unity 2021.2+");
+#endif
 
                     case "render_ui":
+#if UNITY_2021_2_OR_NEWER
                         return RenderUI(@params);
+#else
+                        return new ErrorResponse("render_ui requires Unity 2021.2+");
+#endif
 
                     case "link_stylesheet":
                         return LinkStylesheet(@params);
@@ -94,10 +118,18 @@ namespace MCPForUnity.Editor.Tools
                         return ListUIAssets(@params);
 
                     case "detach_ui_document":
+#if UNITY_2021_2_OR_NEWER
                         return DetachUIDocument(@params);
+#else
+                        return new ErrorResponse("detach_ui_document requires Unity 2021.2+");
+#endif
 
                     case "modify_visual_element":
+#if UNITY_2021_2_OR_NEWER
                         return ModifyVisualElement(@params);
+#else
+                        return new ErrorResponse("modify_visual_element requires Unity 2021.2+");
+#endif
 
                     default:
                         return new ErrorResponse($"Unknown action: {action}");
@@ -296,6 +328,7 @@ namespace MCPForUnity.Editor.Tools
                 new { path });
         }
 
+#if UNITY_2021_2_OR_NEWER
         private static object AttachUIDocument(JObject @params)
         {
             var p = new ToolParams(@params);
@@ -330,6 +363,7 @@ namespace MCPForUnity.Editor.Tools
             }
 
             // Load or create PanelSettings
+#if UNITY_2021_2_OR_NEWER
             string panelSettingsPath = p.Get("panel_settings") ?? p.Get("panelSettings");
             PanelSettings panelSettings = null;
 
@@ -364,6 +398,7 @@ namespace MCPForUnity.Editor.Tools
                     }
                 }
             }
+#endif
 
             Undo.RecordObject(go, "Attach UIDocument");
 
@@ -375,7 +410,9 @@ namespace MCPForUnity.Editor.Tools
             }
 
             uiDoc.visualTreeAsset = vta;
+#if UNITY_2021_2_OR_NEWER
             uiDoc.panelSettings = panelSettings;
+#endif
 
             int sortOrder = p.GetInt("sort_order") ?? 0;
             uiDoc.sortingOrder = sortOrder;
@@ -387,11 +424,15 @@ namespace MCPForUnity.Editor.Tools
                 {
                     gameObject = go.name,
                     sourceAsset = sourceAssetPath,
+#if UNITY_2021_2_OR_NEWER
                     panelSettings = AssetDatabase.GetAssetPath(panelSettings),
+#endif
                     sortOrder
                 });
         }
+#endif
 
+#if UNITY_2021_2_OR_NEWER
         private static object CreatePanelSettings(JObject @params)
         {
             var p = new ToolParams(@params);
@@ -479,7 +520,7 @@ namespace MCPForUnity.Editor.Tools
                 return new ErrorResponse($"No PanelSettings found at {path}");
 
             JToken settingsToken = p.GetRaw("settings");
-            if (settingsToken is not JObject settingsObj || settingsObj.Count == 0)
+            if (!(settingsToken is JObject settingsObj) || settingsObj.Count == 0)
                 return new ErrorResponse("'settings' dict is required with at least one property to update.");
 
             var changes = new List<string>();
@@ -620,6 +661,7 @@ namespace MCPForUnity.Editor.Tools
             ps.dynamicAtlasSettings = daCopy;
             changes.Add("dynamicAtlasSettings");
         }
+#endif // UNITY_2021_2_OR_NEWER
 
         // ── Tiny helpers to keep the switch compact ─────────────────────────
 
@@ -704,6 +746,7 @@ namespace MCPForUnity.Editor.Tools
             }
         }
 
+#if UNITY_2021_2_OR_NEWER
         private static object GetVisualTree(JObject @params)
         {
             var p = new ToolParams(@params);
@@ -807,7 +850,7 @@ namespace MCPForUnity.Editor.Tools
 
         // Persistent RenderTextures keyed by PanelSettings instance ID so the panel
         // renders into them automatically every frame.
-        private static readonly Dictionary<int, RenderTexture> s_panelRTs = new();
+        private static readonly Dictionary<int, RenderTexture> s_panelRTs = new Dictionary<int, RenderTexture>();
 
         // Play-mode coroutine capture state.  Only one capture is in-flight at a
         // time; concurrent render_ui calls while a capture is pending are rejected
@@ -1211,6 +1254,7 @@ namespace MCPForUnity.Editor.Tools
                 }
             }
         }
+#endif
 
         // ---- Link Stylesheet ----
 
@@ -1412,6 +1456,7 @@ namespace MCPForUnity.Editor.Tools
 
         // ---- Detach UIDocument ----
 
+#if UNITY_2021_2_OR_NEWER
         private static object DetachUIDocument(JObject @params)
         {
             var p = new ToolParams(@params);
@@ -1756,6 +1801,7 @@ namespace MCPForUnity.Editor.Tools
             if (bool.TryParse(s, out bool result)) return result;
             return null;
         }
+#endif
 
         /// <summary>
         /// Finds the index right after the closing '>' of the root UXML element opening tag.

@@ -44,7 +44,7 @@ namespace MCPForUnity.Editor.Windows
         private VisualElement toolsPanel;
         private VisualElement resourcesPanel;
 
-        private static readonly HashSet<MCPForUnityEditorWindow> OpenWindows = new();
+        private static readonly HashSet<MCPForUnityEditorWindow> OpenWindows = new HashSet<MCPForUnityEditorWindow>();
         private bool guiCreated = false;
         private bool toolsLoaded = false;
         private bool resourcesLoaded = false;
@@ -937,6 +937,7 @@ namespace MCPForUnity.Editor.Windows
             BatchUpmRemove(new[] { packageId }, onComplete);
         }
 
+#if UNITY_2021_2_OR_NEWER
         private static void BatchUpmAdd(string[] packageIds, Action onComplete = null)
         {
             var request = UnityEditor.PackageManager.Client.AddAndRemove(packageIds, null);
@@ -967,6 +968,22 @@ namespace MCPForUnity.Editor.Windows
             };
             EditorApplication.update += pollCallback;
         }
+#else
+        private static void BatchUpmAdd(string[] packageIds, Action onComplete = null)
+        {
+            // Unity 2020.3 doesn't have Client.AddAndRemove, add one at a time
+            foreach (var id in packageIds)
+                UnityEditor.PackageManager.Client.Add(id);
+            onComplete?.Invoke();
+        }
+
+        private static void BatchUpmRemove(string[] packageIds, Action onComplete = null)
+        {
+            foreach (var id in packageIds)
+                UnityEditor.PackageManager.Client.Remove(id);
+            onComplete?.Invoke();
+        }
+#endif
 
         private static void UninstallRoslyn()
         {

@@ -19,11 +19,11 @@ namespace MCPForUnity.Editor.Tools
     public static class ManagePackages
     {
         // Pending async requests keyed by job ID
-        private static readonly Dictionary<string, Request> PendingRequests = new();
+        private static readonly Dictionary<string, Request> PendingRequests = new Dictionary<string, Request>();
 
         // Pending list/search requests keyed by job ID
-        private static readonly Dictionary<string, ListRequest> PendingListRequests = new();
-        private static readonly Dictionary<string, SearchRequest> PendingSearchRequests = new();
+        private static readonly Dictionary<string, ListRequest> PendingListRequests = new Dictionary<string, ListRequest>();
+        private static readonly Dictionary<string, SearchRequest> PendingSearchRequests = new Dictionary<string, SearchRequest>();
 
         public static object HandleCommand(JObject @params)
         {
@@ -360,7 +360,7 @@ namespace MCPForUnity.Editor.Tools
 
             try
             {
-                var allPackages = PackageInfo.GetAllRegisteredPackages();
+                var allPackages = PackageCompatHelper.GetAllPackages();
                 var info = allPackages.FirstOrDefault(pkg =>
                     string.Equals(pkg.name, package, StringComparison.OrdinalIgnoreCase));
 
@@ -593,7 +593,7 @@ namespace MCPForUnity.Editor.Tools
         {
             try
             {
-                var allPackages = PackageInfo.GetAllRegisteredPackages();
+                var allPackages = PackageCompatHelper.GetAllPackages();
                 return new SuccessResponse(
                     "Package manager is available.",
                     new
@@ -700,11 +700,11 @@ namespace MCPForUnity.Editor.Tools
             }
 
             // Normal package ID: lowercase the name portion (Unity requires lowercase)
-            string normalized = package.Contains('@')
+            string normalized = package.IndexOf('@') >= 0
                 ? package.Substring(0, package.IndexOf('@')).ToLowerInvariant() + package.Substring(package.IndexOf('@'))
                 : package.ToLowerInvariant();
 
-            string name = normalized.Contains('@') ? normalized.Substring(0, normalized.IndexOf('@')) : normalized;
+            string name = normalized.IndexOf('@') >= 0 ? normalized.Substring(0, normalized.IndexOf('@')) : normalized;
             if (!Regex.IsMatch(name, @"^[a-z][a-z0-9._-]*(\.[a-z0-9._-]+)+$"))
             {
                 return (false,
@@ -721,7 +721,7 @@ namespace MCPForUnity.Editor.Tools
             {
                 string name = PackageJobManager.ExtractPackageName(packageName);
 
-                var allPackages = PackageInfo.GetAllRegisteredPackages();
+                var allPackages = PackageCompatHelper.GetAllPackages();
                 return allPackages
                     .Where(pkg => pkg.dependencies.Any(d =>
                         string.Equals(d.name, name, StringComparison.OrdinalIgnoreCase)))

@@ -513,7 +513,7 @@ namespace MCPForUnity.Editor.Setup
             var normalizedRoot = Path.GetFullPath(root);
             foreach (var filePath in Directory.GetFiles(normalizedRoot, "*", SearchOption.AllDirectories))
             {
-                var relativePath = Path.GetRelativePath(normalizedRoot, filePath).Replace('\\', '/');
+                var relativePath = GetRelativePathCompat(normalizedRoot, filePath).Replace('\\', '/');
                 if (string.Equals(relativePath, SyncOwnershipMarker, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
@@ -523,6 +523,30 @@ namespace MCPForUnity.Editor.Setup
             }
 
             return map;
+        }
+
+        /// <summary>
+        /// .NET Standard 2.0 compatible replacement for Path.GetRelativePath (not available until .NET Standard 2.1).
+        /// </summary>
+        private static string GetRelativePathCompat(string basePath, string fullPath)
+        {
+            try
+            {
+                var baseUri = new Uri(EnsureTrailingSeparator(basePath));
+                var fullUri = new Uri(fullPath);
+                return Uri.UnescapeDataString(baseUri.MakeRelativeUri(fullUri).ToString().Replace('/', Path.DirectorySeparatorChar));
+            }
+            catch
+            {
+                return fullPath;
+            }
+        }
+
+        private static string EnsureTrailingSeparator(string path)
+        {
+            if (!path.EndsWith(Path.DirectorySeparatorChar.ToString()) && !path.EndsWith(Path.AltDirectorySeparatorChar.ToString()))
+                return path + Path.DirectorySeparatorChar;
+            return path;
         }
 
         private static void EnsureManagedInstallRoot(
@@ -808,9 +832,9 @@ namespace MCPForUnity.Editor.Setup
 
         internal sealed class SyncPlan
         {
-            public List<string> Added { get; } = new();
-            public List<string> Updated { get; } = new();
-            public List<string> Deleted { get; } = new();
+            public List<string> Added { get; } = new List<string>();
+            public List<string> Updated { get; } = new List<string>();
+            public List<string> Deleted { get; } = new List<string>();
         }
     }
 }
