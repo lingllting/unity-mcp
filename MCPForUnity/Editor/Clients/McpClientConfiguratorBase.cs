@@ -30,6 +30,14 @@ namespace MCPForUnity.Editor.Clients
         public McpStatus Status => client.status;
         public ConfiguredTransport ConfiguredTransport => client.configuredTransport;
         public virtual bool SupportsAutoConfigure => true;
+        // Default to a filesystem check on the configured path. Concrete configurators
+        // whose presence isn't path-based (CLI binaries, etc.) override this. This makes
+        // any future configurator that forgets to override fail-closed rather than be
+        // treated as "detected" by ConfigureAllDetectedClients.
+        public virtual bool IsInstalled => ParentDirectoryExists(GetConfigPath());
+        private static readonly ConfiguredTransport[] DefaultTransports =
+            { ConfiguredTransport.Stdio, ConfiguredTransport.Http };
+        public virtual IReadOnlyList<ConfiguredTransport> SupportedTransports => DefaultTransports;
         public virtual bool SupportsSkills => false;
         public virtual string GetConfigureActionLabel() => "Configure";
         public virtual string GetSkillInstallPath() => null;
@@ -37,6 +45,11 @@ namespace MCPForUnity.Editor.Clients
         public abstract string GetConfigPath();
         public abstract McpStatus CheckStatus(bool attemptAutoRewrite = true);
         public abstract void Configure();
+
+        /// <summary>Default Unregister is a no-op. Override in JsonFileMcpConfigurator /
+        /// ClaudeCliMcpConfigurator etc. where removal has a concrete implementation.</summary>
+        public virtual void Unregister() { }
+
         public abstract string GetManualSnippet();
         public abstract IList<string> GetInstallationSteps();
 
@@ -57,6 +70,17 @@ namespace MCPForUnity.Editor.Clients
             if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
                 return client.macConfigPath;
             return client.linuxConfigPath;
+        }
+
+        protected static bool ParentDirectoryExists(string configPath)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(configPath)) return false;
+                string parent = Path.GetDirectoryName(configPath);
+                return !string.IsNullOrEmpty(parent) && Directory.Exists(parent);
+            }
+            catch { return false; }
         }
 
         protected bool UrlsEqual(string a, string b)
@@ -131,6 +155,8 @@ namespace MCPForUnity.Editor.Clients
 
         public override string GetConfigPath() => CurrentOsPath();
 
+        public override bool IsInstalled => ParentDirectoryExists(GetConfigPath());
+
         public override McpStatus CheckStatus(bool attemptAutoRewrite = true)
         {
             try
@@ -148,41 +174,37 @@ namespace MCPForUnity.Editor.Clients
                 string configuredUrl = null;
                 bool configExists = false;
 
-                if (client.IsVsCodeLayout)
                 {
-                    var vsConfig = JsonConvert.DeserializeObject<JToken>(configJson) as JObject;
-                    if (vsConfig != null)
+                    var rootConfig = JsonConvert.DeserializeObject<JToken>(configJson) as JObject;
+                    JToken unityToken = null;
+                    if (rootConfig != null)
                     {
-                        var unityToken =
-                            vsConfig["servers"]?["unityMCP"]
-                            ?? vsConfig["mcp"]?["servers"]?["unityMCP"];
-
-                        if (unityToken is JObject unityObj)
-                        {
-                            configExists = true;
-
-                            var argsToken = unityObj["args"];
-                            if (argsToken is JArray)
-                            {
-                                args = argsToken.ToObject<string[]>();
-                            }
-
-                            var urlToken = unityObj["url"] ?? unityObj["serverUrl"];
-                            if (urlToken != null && urlToken.Type != JTokenType.Null)
-                            {
-                                configuredUrl = urlToken.ToString();
-                            }
-                        }
+                        string containerKey = string.IsNullOrEmpty(client.ServerContainerKey)
+                            ? "mcpServers" : client.ServerContainerKey;
+                        unityToken = client.IsVsCodeLayout
+                            ? rootConfig["servers"]?["unityMCP"]
+                                ?? rootConfig["mcp"]?["servers"]?["unityMCP"]
+                            : rootConfig[containerKey]?["unityMCP"];
                     }
-                }
-                else
-                {
-                    McpConfig standardConfig = JsonConvert.DeserializeObject<McpConfig>(configJson);
-                    if (standardConfig?.mcpServers?.unityMCP != null)
+
+                    if (unityToken is JObject unityObj)
                     {
-                        args = standardConfig.mcpServers.unityMCP.args;
-                        configuredUrl = standardConfig.mcpServers.unityMCP.url;
                         configExists = true;
+
+                        var argsToken = unityObj["args"];
+                        if (argsToken is JArray)
+                        {
+                            args = argsToken.ToObject<string[]>();
+                        }
+
+                        // Clients diverge on the HTTP URL property name: "url" (Cursor/VSCode/Claude),
+                        // "serverUrl" (Antigravity/Windsurf), "httpUrl" (Gemini CLI). Accept all three
+                        // so CheckStatus matches what Configure() actually wrote.
+                        var urlToken = unityObj["url"] ?? unityObj["serverUrl"] ?? unityObj["httpUrl"];
+                        if (urlToken != null && urlToken.Type != JTokenType.Null)
+                        {
+                            configuredUrl = urlToken.ToString();
+                        }
                     }
                 }
 
@@ -319,6 +341,9 @@ namespace MCPForUnity.Editor.Clients
 
         public override void Configure()
         {
+            // Always idempotent-write. The per-client UI button routes through Unregister
+            // when the user clicks while the client is already Configured; the bulk
+            // "Configure All" path calls this directly and expects an unconditional write.
             string path = GetConfigPath();
             McpConfigurationHelper.EnsureConfigDirectoryExists(path);
             string result = McpConfigurationHelper.WriteMcpConfiguration(path, client);
@@ -330,6 +355,62 @@ namespace MCPForUnity.Editor.Clients
             else
             {
                 throw new InvalidOperationException(result);
+            }
+        }
+
+        public override string GetConfigureActionLabel()
+            => client.status == McpStatus.Configured ? "Unregister" : "Configure";
+
+        /// <summary>
+        /// Removes the unityMCP entry from the client's JSON config (VS Code-style
+        /// `servers` / `mcp.servers` layouts, the standard `mcpServers` layout, or a
+        /// client-specific container such as Kilo's `mcp`). Leaves the file in place so we
+        /// don't clobber other servers the user has configured.
+        /// </summary>
+        public override void Unregister()
+        {
+            string path = GetConfigPath();
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    client.SetStatus(McpStatus.NotConfigured);
+                    client.configuredTransport = Models.ConfiguredTransport.Unknown;
+                    return;
+                }
+
+                var root = JsonConvert.DeserializeObject<JToken>(File.ReadAllText(path)) as JObject;
+                if (root == null)
+                {
+                    client.SetStatus(McpStatus.NotConfigured);
+                    client.configuredTransport = Models.ConfiguredTransport.Unknown;
+                    return;
+                }
+
+                bool removed = false;
+                if (client.IsVsCodeLayout)
+                {
+                    if ((root["servers"] as JObject)?.Remove("unityMCP") == true) removed = true;
+                    if ((root["mcp"]?["servers"] as JObject)?.Remove("unityMCP") == true) removed = true;
+                }
+                else
+                {
+                    string containerKey = string.IsNullOrEmpty(client.ServerContainerKey)
+                        ? "mcpServers" : client.ServerContainerKey;
+                    if ((root[containerKey] as JObject)?.Remove("unityMCP") == true) removed = true;
+                }
+
+                if (removed)
+                {
+                    File.WriteAllText(path, root.ToString(Formatting.Indented));
+                }
+
+                client.SetStatus(McpStatus.NotConfigured);
+                client.configuredTransport = Models.ConfiguredTransport.Unknown;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to unregister: {ex.Message}", ex);
             }
         }
 
@@ -356,6 +437,8 @@ namespace MCPForUnity.Editor.Clients
         public CodexMcpConfigurator(McpClient client) : base(client) { }
 
         public override string GetConfigPath() => CurrentOsPath();
+
+        public override bool IsInstalled => ParentDirectoryExists(GetConfigPath());
 
         public override McpStatus CheckStatus(bool attemptAutoRewrite = true)
         {
@@ -541,6 +624,8 @@ namespace MCPForUnity.Editor.Clients
         public override string GetConfigureActionLabel() => client.status == McpStatus.Configured ? "Unregister" : "Configure";
 
         public override string GetConfigPath() => "Managed via Claude CLI";
+
+        public override bool IsInstalled => MCPServiceLocator.Paths.IsClaudeCliDetected();
 
         /// <summary>
         /// Returns the project directory that CLI-based configurators will use as the working directory
@@ -945,7 +1030,7 @@ namespace MCPForUnity.Editor.Clients
             client.configuredTransport = HttpEndpointUtility.GetCurrentServerTransport();
         }
 
-        private void Unregister()
+        public override void Unregister()
         {
             var pathService = MCPServiceLocator.Paths;
             string claudePath = pathService.GetClaudeCliPath();
@@ -1285,43 +1370,44 @@ namespace MCPForUnity.Editor.Clients
                 if (projects == null)
                     return (null, null);
 
-                // Build a dictionary of normalized paths for quick lookup
-                // Use last entry for duplicates (forward/backslash variants) as it's typically more recent
+                // Build a dictionary of normalized paths for quick lookup.
+                // Duplicate keys (forward/backslash variants of the same path)
+                // are merged by preferring the entry that actually carries a
+                // UnityMCP registration: JSON property order is not correlated
+                // with recency across variants, so blind last-entry-wins lets a
+                // stale variant without mcpServers shadow a real registration
+                // and CheckStatus reports NotConfigured despite a working
+                // `claude mcp add --scope local` setup.
                 var normalizedProjects = new Dictionary<string, JObject>(StringComparer.OrdinalIgnoreCase);
                 foreach (var project in projects.Properties())
                 {
                     string normalizedPath = NormalizePath(project.Name);
-                    normalizedProjects[normalizedPath] = project.Value as JObject;
+                    var value = project.Value as JObject;
+                    if (!normalizedProjects.TryGetValue(normalizedPath, out var existing)
+                        || RegistrationRank(value) >= RegistrationRank(existing))
+                    {
+                        normalizedProjects[normalizedPath] = value;
+                    }
                 }
 
                 // Walk up the directory tree to find a matching project config
                 // Claude Code may be configured at a parent directory (e.g., repo root)
                 // while Unity project is in a subdirectory (e.g., TestProjects/UnityMCPTests)
-                string currentDir = NormalizePath(projectDir);
-                while (!string.IsNullOrEmpty(currentDir))
-                {
-                    if (normalizedProjects.TryGetValue(currentDir, out var projectConfig))
-                    {
-                        var mcpServers = projectConfig?["mcpServers"] as JObject;
-                        if (mcpServers != null)
-                        {
-                            foreach (var server in mcpServers.Properties())
-                            {
-                                if (string.Equals(server.Name, "UnityMCP", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    return (server.Value as JObject, null);
-                                }
-                            }
-                        }
-                        // Found the project but no UnityMCP - don't continue walking up
-                        return (null, null);
-                    }
+                var fromProjectDir = FindUnityServerFromWalk(normalizedProjects, NormalizePath(projectDir));
+                if (fromProjectDir != null)
+                    return (fromProjectDir, null);
 
-                    // Move up one directory
-                    int lastSlash = currentDir.LastIndexOf('/');
-                    if (lastSlash <= 0)
-                        break;
-                    currentDir = currentDir.Substring(0, lastSlash);
+                // `claude mcp add --scope local` keys the registration by the
+                // git MAIN repo root. When the Unity project lives in a linked
+                // worktree, that root is a sibling path the ancestor walk above
+                // can never reach — retry from the parsed main root.
+                string mainRoot = GetGitMainRepoRoot(projectDir);
+                if (!string.IsNullOrEmpty(mainRoot)
+                    && !string.Equals(mainRoot, NormalizePath(projectDir), StringComparison.OrdinalIgnoreCase))
+                {
+                    var fromMainRoot = FindUnityServerFromWalk(normalizedProjects, mainRoot);
+                    if (fromMainRoot != null)
+                        return (fromMainRoot, null);
                 }
 
                 return (null, null);
@@ -1330,6 +1416,80 @@ namespace MCPForUnity.Editor.Clients
             {
                 return (null, $"Error reading user Claude config: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Walks up from startDir (normalized) looking for a project entry with
+        /// a UnityMCP registration. Stops at the first project entry found even
+        /// if it lacks UnityMCP (a configured project boundary).
+        /// </summary>
+        private static JObject FindUnityServerFromWalk(Dictionary<string, JObject> normalizedProjects, string startDir)
+        {
+            string currentDir = startDir;
+            while (!string.IsNullOrEmpty(currentDir))
+            {
+                if (normalizedProjects.TryGetValue(currentDir, out var projectConfig))
+                {
+                    var mcpServers = projectConfig?["mcpServers"] as JObject;
+                    if (mcpServers != null)
+                    {
+                        foreach (var server in mcpServers.Properties())
+                        {
+                            if (string.Equals(server.Name, "UnityMCP", StringComparison.OrdinalIgnoreCase))
+                            {
+                                return server.Value as JObject;
+                            }
+                        }
+                    }
+                    // Found the project but no UnityMCP - don't continue walking up
+                    return null;
+                }
+
+                // Move up one directory
+                int lastSlash = currentDir.LastIndexOf('/');
+                if (lastSlash <= 0)
+                    break;
+                currentDir = currentDir.Substring(0, lastSlash);
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// For a linked git worktree, the main repo root parsed from the .git
+        /// pointer file ("gitdir: &lt;root&gt;/.git/worktrees/&lt;name&gt;"),
+        /// normalized. Null for a regular checkout (.git directory) or
+        /// anything unparseable.
+        /// </summary>
+        private static string GetGitMainRepoRoot(string dir)
+        {
+            try
+            {
+                string gitPath = Path.Combine(dir, ".git");
+                if (!File.Exists(gitPath)) return null;
+                string line = File.ReadAllText(gitPath).Trim();
+                if (!line.StartsWith("gitdir:", StringComparison.OrdinalIgnoreCase)) return null;
+                string gitDir = line.Substring("gitdir:".Length).Trim();
+                if (!Path.IsPathRooted(gitDir)) gitDir = Path.Combine(dir, gitDir);
+                gitDir = NormalizePath(Path.GetFullPath(gitDir));
+                int i = gitDir.LastIndexOf("/.git/", StringComparison.OrdinalIgnoreCase);
+                return i > 0 ? gitDir.Substring(0, i) : null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// Ranks a ~/.claude.json project entry for duplicate-key merging:
+        /// 2 = has a UnityMCP registration, 1 = has other mcpServers, 0 = none.
+        /// </summary>
+        private static int RegistrationRank(JObject projectConfig)
+        {
+            if (!(projectConfig?["mcpServers"] is JObject servers)) return 0;
+            foreach (var server in servers.Properties())
+            {
+                if (string.Equals(server.Name, "UnityMCP", StringComparison.OrdinalIgnoreCase))
+                    return 2;
+            }
+            return servers.HasValues ? 1 : 0;
         }
 
         /// <summary>

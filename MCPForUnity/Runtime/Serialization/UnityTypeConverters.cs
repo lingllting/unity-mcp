@@ -1,6 +1,8 @@
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
+using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
 using MCPForUnity.Runtime.Helpers;
 #if UNITY_EDITOR
@@ -267,7 +269,64 @@ namespace MCPForUnity.Runtime.Serialization
     }
 
     // Converter for UnityEngine.Object references (GameObjects, Components, Materials, Textures, etc.)
-    public class UnityEngineObjectConverter : JsonConverter<UnityEngine.Object>
+    // Intentionally internal: this converter is meant for MCP-internal serialization only.
+    // Leaving it public lets third-party Newtonsoft converter scanners (e.g. jillejr's
+    // newtonsoft-json-for-unity converters) instantiate it via reflection and bind it into
+    // JsonConvert.DefaultSettings, which silently rewrites any UnityEngine.Object reference in
+    // unrelated project code as an asset path string. See issue #1138.
+    /// <summary>
+    /// Serializes Unity.Mathematics value types (float2/3/4, int*, quaternion, float4x4, ...) as
+    /// their public instance fields only. Those structs also expose hundreds of public swizzle
+    /// properties (float3.xxy, .zyx, float4 has 336 of them), each returning a new struct with
+    /// swizzles of its own, so the default object contract walks a combinatorial tree that never
+    /// finishes in practice and freezes the Editor (issue #1415). Types are matched by namespace so
+    /// the package does not need a dependency on com.unity.mathematics.
+    /// </summary>
+    public class UnityMathematicsConverter : JsonConverter
+    {
+        private const string MathematicsNamespace = "Unity.Mathematics";
+        private static readonly Dictionary<Type, FieldInfo[]> _fieldCache = new Dictionary<Type, FieldInfo[]>();
+
+        public override bool CanRead => false;
+
+        public override bool CanConvert(Type objectType)
+        {
+            return objectType.IsValueType
+                && !objectType.IsPrimitive
+                && !objectType.IsEnum
+                && objectType.Namespace == MathematicsNamespace;
+        }
+
+        public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
+        {
+            Type type = value.GetType();
+            FieldInfo[] fields;
+            lock (_fieldCache)
+            {
+                if (!_fieldCache.TryGetValue(type, out fields))
+                {
+                    fields = type.GetFields(BindingFlags.Public | BindingFlags.Instance);
+                    _fieldCache[type] = fields;
+                }
+            }
+
+            writer.WriteStartObject();
+            foreach (FieldInfo field in fields)
+            {
+                writer.WritePropertyName(field.Name);
+                // Nested math types (quaternion.value is a float4, float4x4 columns are float4) come back through this converter.
+                serializer.Serialize(writer, field.GetValue(value));
+            }
+            writer.WriteEndObject();
+        }
+
+        public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
+        {
+            throw new NotSupportedException($"{nameof(UnityMathematicsConverter)} only serializes {MathematicsNamespace} types.");
+        }
+    }
+
+    internal class UnityEngineObjectConverter : JsonConverter<UnityEngine.Object>
     {
         public override bool CanRead => true; // We need to implement ReadJson
         public override bool CanWrite => true;

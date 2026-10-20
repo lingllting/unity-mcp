@@ -6,6 +6,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using MCPForUnity.Editor.Helpers;
+using MCPForUnity.Runtime.Helpers;
 using Microsoft.CSharp;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
@@ -29,11 +30,34 @@ namespace MCPForUnity.Editor.Tools
 
         private static readonly List<HistoryEntry> _history = new List<HistoryEntry>();
         private static string[] _cachedAssemblyPaths;
+        private static string[] _cachedCodeDomAssemblyPaths;
+
+        // Every compile emits a fresh in-memory "MCPDynamic" assembly, and Mono cannot unload
+        // one, so recompiling an identical snippet leaks an assembly per call until the next
+        // domain reload (see issue #1351). Cache the compiled output keyed on the wrapped
+        // source so repeated calls reuse one assembly.
+        private const int MaxCompiledCacheEntries = 64;
+        private static readonly Dictionary<string, CompiledSnippet> _compiledCache =
+            new Dictionary<string, CompiledSnippet>(StringComparer.Ordinal);
+
+        private readonly struct CompiledSnippet
+        {
+            public CompiledSnippet(Assembly assembly, string compiler)
+            {
+                Assembly = assembly;
+                Compiler = compiler;
+            }
+
+            public Assembly Assembly { get; }
+            public string Compiler { get; }
+        }
 
         [UnityEditor.InitializeOnLoadMethod]
         private static void OnDomainReload()
         {
             _cachedAssemblyPaths = null;
+            _cachedCodeDomAssemblyPaths = null;
+            _compiledCache.Clear();
             RoslynCompiler.ResetCache();
         }
 
@@ -178,6 +202,11 @@ namespace MCPForUnity.Editor.Tools
         private static object CompileAndExecute(string code, string compiler)
         {
             string wrappedSource = WrapUserCode(code);
+
+            string cacheKey = compiler + "\n" + wrappedSource;
+            if (_compiledCache.TryGetValue(cacheKey, out CompiledSnippet cached))
+                return InvokeCompiled(cached.Assembly, cached.Compiler);
+
             string[] assemblyPaths = GetAssemblyPaths();
 
             Assembly compiled;
@@ -218,6 +247,12 @@ namespace MCPForUnity.Editor.Tools
                     }
                     break;
             }
+
+            // Bound the cache so a stream of genuinely distinct snippets cannot itself become
+            // the leak. Clearing wholesale is enough: the entries are only a compile shortcut.
+            if (_compiledCache.Count >= MaxCompiledCacheEntries)
+                _compiledCache.Clear();
+            _compiledCache[cacheKey] = new CompiledSnippet(compiled, usedCompiler);
 
             return InvokeCompiled(compiled, usedCompiler);
         }
@@ -274,34 +309,83 @@ namespace MCPForUnity.Editor.Tools
             // CodeDom needs the netstandard-aware filtered paths
             var filtered = FilterAssemblyPathsForCodeDom(assemblyPaths);
 
-            using (var provider = new CSharpCodeProvider())
+            // CSharpCodeProvider turns every ReferencedAssemblies entry into a literal /r:"..." flag
+            // on the csc command line. Projects with ~100+ asmdefs blow past Windows' 32 KB
+            // CreateProcess argument limit and fail with "The filename or extension is too long."
+            // Route references through a response file (@responsefile is supported by both mcs and
+            // Roslyn csc) so we pass exactly one short argument regardless of reference count.
+            string responseFilePath = Path.Combine(Path.GetTempPath(), $"mcp-codedom-{Guid.NewGuid():N}.rsp");
+
+            try
             {
-                var parameters = new CompilerParameters
+                using (var writer = new StreamWriter(responseFilePath, append: false, Encoding.UTF8))
                 {
-                    GenerateInMemory = true,
-                    GenerateExecutable = false,
-                    TreatWarningsAsErrors = false,
-                };
-
-                foreach (var path in filtered)
-                    parameters.ReferencedAssemblies.Add(path);
-
-                var results = provider.CompileAssemblyFromSource(parameters, source);
-
-                if (results.Errors.HasErrors)
-                {
-                    foreach (CompilerError error in results.Errors)
+                    foreach (var path in filtered)
                     {
-                        if (!error.IsWarning)
+                        writer.Write("/r:\"");
+                        writer.Write(path);
+                        writer.WriteLine("\"");
+                    }
+                }
+
+                // Compile to a controlled DLL path instead of in-memory. mcs prints a stray BOM line on
+                // stdout that Mono's CodeDom can't parse, so it fabricates a bogus error (no error number,
+                // text is just the BOM) and refuses to surface the assembly — even though mcs exits 0 and
+                // wrote the DLL. We skip that bogus error and Assembly.Load the produced DLL ourselves.
+                string outputAssemblyPath = Path.Combine(Path.GetTempPath(), $"mcp-codedom-{Guid.NewGuid():N}.dll");
+                using (var provider = new CSharpCodeProvider())
+                {
+                    var parameters = new CompilerParameters
+                    {
+                        GenerateInMemory = false,
+                        OutputAssembly = outputAssemblyPath,
+                        GenerateExecutable = false,
+                        TreatWarningsAsErrors = false,
+                        CompilerOptions = "@\"" + responseFilePath + "\"",
+                    };
+
+                    try
+                    {
+                        var results = provider.CompileAssemblyFromSource(parameters, source);
+
+                        bool hasRealErrors = false;
+                        foreach (CompilerError error in results.Errors)
                         {
+                            if (error.IsWarning)
+                                continue;
+
+                            // The bogus BOM "error": no error number, text is just the BOM/whitespace.
+                            string text = (error.ErrorText ?? "").Trim('\uFEFF', ' ', '\t', '\r', '\n');
+                            if (string.IsNullOrEmpty(error.ErrorNumber) && string.IsNullOrEmpty(text))
+                                continue;
+
+                            hasRealErrors = true;
                             int userLine = Math.Max(1, error.Line - WrapperLineOffset);
                             errors.Add($"Line {userLine}: {error.ErrorText}");
                         }
-                    }
-                    return null;
-                }
 
-                return results.CompiledAssembly;
+                        if (hasRealErrors)
+                            return null;
+
+                        if (!File.Exists(outputAssemblyPath))
+                        {
+                            errors.Add("CodeDom reported success but produced no assembly.");
+                            return null;
+                        }
+
+                        return Assembly.Load(File.ReadAllBytes(outputAssemblyPath));
+                    }
+                    finally
+                    {
+                        try { if (File.Exists(outputAssemblyPath)) File.Delete(outputAssemblyPath); }
+                        catch { /* best effort cleanup */ }
+                    }
+                }
+            }
+            finally
+            {
+                try { if (File.Exists(responseFilePath)) File.Delete(responseFilePath); }
+                catch { /* best effort */ }
             }
         }
 
@@ -316,16 +400,110 @@ namespace MCPForUnity.Editor.Tools
             "System.Collections",
         };
 
-        private static string[] FilterAssemblyPathsForCodeDom(string[] allPaths)
+        internal static string[] FilterAssemblyPathsForCodeDom(string[] allPaths)
         {
-            bool hasNetstandard = allPaths.Any(p =>
+            var useCache = ReferenceEquals(allPaths, _cachedAssemblyPaths);
+            if (useCache && _cachedCodeDomAssemblyPaths != null)
+                return _cachedCodeDomAssemblyPaths;
+
+            var hasNetstandard = allPaths.Any(p =>
                 string.Equals(Path.GetFileNameWithoutExtension(p), "netstandard", StringComparison.OrdinalIgnoreCase));
 
-            if (!hasNetstandard)
-                return allPaths;
+            var filtered = hasNetstandard
+                ? allPaths.Where(p =>
+                    !_codedomDuplicateAssemblies.Contains(Path.GetFileNameWithoutExtension(p))).ToArray()
+                : allPaths;
 
-            return allPaths.Where(p =>
-                !_codedomDuplicateAssemblies.Contains(Path.GetFileNameWithoutExtension(p))).ToArray();
+            var result = DeduplicateAssemblyPathsForCodeDom(filtered);
+            if (useCache)
+                _cachedCodeDomAssemblyPaths = result;
+            return result;
+        }
+
+        private static string[] DeduplicateAssemblyPathsForCodeDom(string[] paths)
+        {
+            var candidates = new List<CodeDomAssemblyCandidate>();
+            var unresolvedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var path in paths)
+            {
+                try
+                {
+                    candidates.Add(new CodeDomAssemblyCandidate(path, AssemblyName.GetAssemblyName(path)));
+                }
+                catch
+                {
+                    unresolvedPaths.Add(path);
+                }
+            }
+
+            var groups = candidates
+                .GroupBy(candidate => candidate.AssemblyName.Name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            if (groups.All(group => group.Count() == 1))
+                return paths;
+
+            var referenceCounts = GetLoadedAssemblyReferenceCounts();
+            var selectedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var group in groups)
+            {
+                var selected = group
+                    .OrderByDescending(candidate => GetReferenceCount(referenceCounts, candidate.AssemblyName.FullName))
+                    .ThenByDescending(candidate => candidate.AssemblyName.Version)
+                    .ThenBy(candidate => candidate.Path, StringComparer.OrdinalIgnoreCase)
+                    .First();
+                selectedPaths.Add(selected.Path);
+            }
+
+            return paths.Where(path => unresolvedPaths.Contains(path) || selectedPaths.Contains(path)).ToArray();
+        }
+
+        private static Dictionary<string, int> GetLoadedAssemblyReferenceCounts()
+        {
+            var referenceCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var assembly in UnityAssembliesCompat.GetLoadedAssemblies())
+            {
+                if (assembly.IsDynamic) continue;
+
+                AssemblyName[] referencedAssemblies;
+                try
+                {
+                    referencedAssemblies = assembly.GetReferencedAssemblies();
+                }
+                catch (NotSupportedException)
+                {
+                    continue;
+                }
+
+                foreach (var referencedAssembly in referencedAssemblies)
+                {
+                    var fullName = referencedAssembly.FullName;
+                    referenceCounts.TryGetValue(fullName, out var count);
+                    referenceCounts[fullName] = count + 1;
+                }
+            }
+
+            return referenceCounts;
+        }
+
+        private static int GetReferenceCount(Dictionary<string, int> referenceCounts, string fullName)
+        {
+            return referenceCounts.TryGetValue(fullName, out var count) ? count : 0;
+        }
+
+        private sealed class CodeDomAssemblyCandidate
+        {
+            public CodeDomAssemblyCandidate(string path, AssemblyName assemblyName)
+            {
+                Path = path;
+                AssemblyName = assemblyName;
+            }
+
+            public string Path { get; }
+            public AssemblyName AssemblyName { get; }
         }
 
         // ──────────────────── Shared helpers ────────────────────
@@ -360,7 +538,7 @@ namespace MCPForUnity.Editor.Tools
         {
             var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            foreach (var assembly in UnityAssembliesCompat.GetLoadedAssemblies())
             {
                 try
                 {
@@ -671,7 +849,13 @@ namespace MCPForUnity.Editor.Tools
             }
             catch (Exception e)
             {
-                errors.Add($"Roslyn compilation error: {e.Message}");
+                // Walk to the deepest cause: TargetInvocationException (and friends) wrap the real
+                // failure inside .InnerException, and reporting only e.Message hides everything
+                // useful (e.g. a missing transitive dep manifests as the generic "Exception has been
+                // thrown by the target of an invocation.").
+                Exception root = e;
+                while (root.InnerException != null) root = root.InnerException;
+                errors.Add($"Roslyn compilation error: {root.GetType().Name}: {root.Message}");
                 return null;
             }
         }
