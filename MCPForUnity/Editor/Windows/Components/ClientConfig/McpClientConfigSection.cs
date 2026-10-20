@@ -84,14 +84,9 @@ namespace MCPForUnity.Editor.Windows.Components.ClientConfig
 
         private void CacheUIElements()
         {
-#if UNITY_2021_2_OR_NEWER
-            clientDropdown = Root.Q<DropdownField>("client-dropdown");
-#else
-            // In Unity 2020.3, DropdownField doesn't exist in UXML.
-            // The UXML has a plain VisualElement placeholder; clientDropdown will be
-            // created as a PopupField<string> in InitializeUI().
+            // The shared UXML uses a placeholder on every Unity version. InitializeUI
+            // replaces it with the dropdown type supported by the current editor.
             clientDropdown = null;
-#endif
             configureAllButton = Root.Q<Button>("configure-all-button");
             clientStatusIndicator = Root.Q<VisualElement>("client-status-indicator");
             clientStatusLabel = Root.Q<Label>("client-status");
@@ -138,12 +133,8 @@ namespace MCPForUnity.Editor.Windows.Components.ClientConfig
             }
 
             var clientNames = configurators.Select(c => c.DisplayName).ToList();
-#if UNITY_2021_2_OR_NEWER
-            clientDropdown.choices = clientNames;
-#else
-            // PopupField<string> in Unity 2020.3 doesn't expose a public .choices setter.
-            // The UXML contains a plain VisualElement placeholder since DropdownField
-            // doesn't exist in 2020.3. Find it and replace with a real PopupField.
+            // Create from the same placeholder on all supported Unity versions.
+            // Unity 2020's PopupField has no public choices setter or UXML factory.
             {
                 var placeholder = Root.Q<VisualElement>("client-dropdown");
                 if (placeholder != null)
@@ -151,21 +142,16 @@ namespace MCPForUnity.Editor.Windows.Components.ClientConfig
                     var parent = placeholder.parent;
                     int idx = parent.IndexOf(placeholder);
                     parent.Remove(placeholder);
+#if UNITY_2021_2_OR_NEWER
+                    clientDropdown = new DropdownField(clientNames, 0);
+#else
                     clientDropdown = new UnityEditor.UIElements.PopupField<string>(clientNames, 0);
+#endif
                     clientDropdown.name = "client-dropdown";
-                    parent.Insert(idx, clientDropdown);
-                }
-                else if (clientDropdown != null)
-                {
-                    var parent = clientDropdown.parent;
-                    int idx = parent.IndexOf(clientDropdown);
-                    parent.Remove(clientDropdown);
-                    clientDropdown = new UnityEditor.UIElements.PopupField<string>(clientNames, 0);
-                    clientDropdown.name = "client-dropdown";
+                    clientDropdown.AddToClassList("setting-dropdown-inline");
                     parent.Insert(idx, clientDropdown);
                 }
             }
-#endif
             if (clientNames.Count > 0 && clientDropdown != null)
             {
                 // Restore last selected client from EditorPrefs

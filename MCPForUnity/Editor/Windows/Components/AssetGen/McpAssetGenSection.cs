@@ -9,6 +9,9 @@ using MCPForUnity.Editor.Services.AssetGen;
 using MCPForUnity.Editor.Services.AssetGen.Import;
 using UnityEngine;
 using UnityEngine.UIElements;
+#if !UNITY_2021_2_OR_NEWER
+using DropdownField = UnityEditor.UIElements.PopupField<string>;
+#endif
 
 namespace MCPForUnity.Editor.Windows.Components.AssetGen
 {
@@ -59,11 +62,11 @@ namespace MCPForUnity.Editor.Windows.Components.AssetGen
 
         // Per-provider enable toggles for the GLB-capable (model) providers, used to
         // recompute the glTFast notice when a toggle changes.
-        private readonly List<(string Id, Toggle Toggle)> modelEnableToggles = new();
-        private readonly List<(VisualElement Container, string Kind, string Provider)> modelControls = new();
-        private readonly Dictionary<string, string> searches = new();
+        private readonly List<(string Id, Toggle Toggle)> modelEnableToggles = new List<(string Id, Toggle Toggle)>();
+        private readonly List<(VisualElement Container, string Kind, string Provider)> modelControls = new List<(VisualElement Container, string Kind, string Provider)>();
+        private readonly Dictionary<string, string> searches = new Dictionary<string, string>();
         // Last failed compatibility check per kind/provider, kept so a catalog rebuild cannot hide it.
-        private readonly Dictionary<string, (string Id, string Error)> verifyErrors = new();
+        private readonly Dictionary<string, (string Id, string Error)> verifyErrors = new Dictionary<string, (string Id, string Error)>();
 
         public VisualElement Root { get; private set; }
 
@@ -101,7 +104,18 @@ namespace MCPForUnity.Editor.Windows.Components.AssetGen
         {
             providersContainer = Root.Q<VisualElement>("assetgen-providers-container");
             gltfastNotice = Root.Q<VisualElement>("gltfast-notice");
-            formatDropdown = Root.Q<DropdownField>("assetgen-format-dropdown");
+            // Unity 2020 has no DropdownField UXML factory; create the field from a placeholder.
+            var formatPlaceholder = Root.Q<VisualElement>("assetgen-format-dropdown");
+            if (formatPlaceholder != null)
+            {
+                formatDropdown = new DropdownField(new List<string> { "glb", "fbx", "obj" }, 0);
+                formatDropdown.name = "assetgen-format-dropdown";
+                formatDropdown.AddToClassList("setting-dropdown-inline");
+                var parent = formatPlaceholder.parent;
+                int index = parent.IndexOf(formatPlaceholder);
+                parent.Remove(formatPlaceholder);
+                parent.Insert(index, formatDropdown);
+            }
             outputRootField = Root.Q<TextField>("assetgen-output-root");
             autoNormalizeToggle = Root.Q<Toggle>("assetgen-auto-normalize");
             refreshButton = Root.Q<Button>("assetgen-refresh");
@@ -116,7 +130,6 @@ namespace MCPForUnity.Editor.Windows.Components.AssetGen
             // One-time choices + tooltips; the field values are populated by SyncFromPrefs.
             if (formatDropdown != null)
             {
-                formatDropdown.choices = new List<string> { "glb", "fbx", "obj" };
                 formatDropdown.tooltip = "Default container format for generated 3D models.";
             }
 

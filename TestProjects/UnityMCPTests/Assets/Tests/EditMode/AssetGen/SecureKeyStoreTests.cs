@@ -29,6 +29,19 @@ namespace MCPForUnityTests.Editor.AssetGen
         }
 
         [Test]
+        public void DeriveKeys_MatchesPbkdf2Sha256Reference()
+        {
+            // Python hashlib.pbkdf2_hmac("sha256", password.encode(), bytes(range(16)), 200000, 64).
+            var salt = new byte[16];
+            for (int i = 0; i < salt.Length; i++) salt[i] = (byte)i;
+            byte[] material = EncryptedFileKeyStore.DeriveKeyMaterial("compat-测试", salt);
+            string hex = BitConverter.ToString(material).Replace("-", "").ToLowerInvariant();
+            Assert.AreEqual(
+                "288c01e94f1249c7070eed054855206edbf0f2ecc24f5d7a72e7886d8147982cac" +
+                "90a987b4e959b67831918f293e94fe9cb83b02134f78b9f0218c98164a6782", hex);
+        }
+
+        [Test]
         public void SetThenGet_RoundTrips()
         {
             _store.Set("tripo", "tsk_secret_value_123");

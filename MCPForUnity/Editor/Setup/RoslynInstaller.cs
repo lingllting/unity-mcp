@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Reflection;
 #if UNITY_2021_2_OR_NEWER
 using System.IO.Compression;
 #endif

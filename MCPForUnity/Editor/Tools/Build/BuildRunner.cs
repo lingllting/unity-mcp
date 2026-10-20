@@ -58,9 +58,6 @@ namespace MCPForUnity.Editor.Tools.Build
                 locationPathName = outputPath,
                 scenes = scenes ?? GetDefaultScenes(),
                 options = buildOptions,
-#if UNITY_2021_2_OR_NEWER
-                subtarget = subtarget
-#endif
             };
 
             // Subtarget is only meaningful for Standalone (Server vs Player).
@@ -69,6 +66,7 @@ namespace MCPForUnity.Editor.Tools.Build
             // a specific texture format — confirmed Unity bug IN-102413 where value 0
             // on Unity 6000+ triggers PVRTC, ignoring Player Settings.
             // Leave at platform default (0) so Unity respects Player Settings.
+#if UNITY_2021_2_OR_NEWER
             if (target == BuildTarget.StandaloneWindows
                 || target == BuildTarget.StandaloneWindows64
                 || target == BuildTarget.StandaloneOSX
@@ -76,6 +74,7 @@ namespace MCPForUnity.Editor.Tools.Build
             {
                 options.subtarget = subtarget;
             }
+#endif
 
             return options;
         }

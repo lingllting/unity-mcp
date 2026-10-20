@@ -92,14 +92,41 @@ namespace MCPForUnity.Editor.Security
             byte[] master = LoadOrCreate(Path.Combine(_dir, "secret.bin"), 32);
             byte[] salt = LoadOrCreate(Path.Combine(_dir, "salt.bin"), 16);
             string password = Convert.ToBase64String(master) + "|" + MachineId();
+            byte[] material = DeriveKeyMaterial(password, salt);
+            encKey = new byte[32];
+            macKey = new byte[32];
+            Buffer.BlockCopy(material, 0, encKey, 0, 32);
+            Buffer.BlockCopy(material, 32, macKey, 0, 32);
+        }
+
+        internal static byte[] DeriveKeyMaterial(string password, byte[] salt)
+        {
+#if UNITY_2021_2_OR_NEWER
             using (var kdf = new Rfc2898DeriveBytes(password, salt, Iterations, HashAlgorithmName.SHA256))
+                return kdf.GetBytes(64);
+#else
+            // Unity 2020's .NET Standard reference API lacks the SHA256 constructor.
+            // Preserve PBKDF2-HMAC-SHA256 and the existing on-disk format on that profile.
+            byte[] material = new byte[64];
+            byte[] input = new byte[salt.Length + 4];
+            Buffer.BlockCopy(salt, 0, input, 0, salt.Length);
+            using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(password)))
             {
-                byte[] material = kdf.GetBytes(64);
-                encKey = new byte[32];
-                macKey = new byte[32];
-                Buffer.BlockCopy(material, 0, encKey, 0, 32);
-                Buffer.BlockCopy(material, 32, macKey, 0, 32);
+                for (int block = 1; block <= 2; block++)
+                {
+                    input[input.Length - 1] = (byte)block;
+                    byte[] u = hmac.ComputeHash(input);
+                    byte[] result = (byte[])u.Clone();
+                    for (int iteration = 1; iteration < Iterations; iteration++)
+                    {
+                        u = hmac.ComputeHash(u);
+                        for (int i = 0; i < result.Length; i++) result[i] ^= u[i];
+                    }
+                    Buffer.BlockCopy(result, 0, material, (block - 1) * 32, 32);
+                }
             }
+            return material;
+#endif
         }
 
         private byte[] Encrypt(byte[] plaintext)
@@ -210,8 +237,8 @@ namespace MCPForUnity.Editor.Security
                     RedirectStandardError = true,
                     RedirectStandardOutput = true,
                 };
-                psi.ArgumentList.Add(mode);
-                psi.ArgumentList.Add(path);
+                SecureKeyStoreProcess.AddArgument(psi, mode);
+                SecureKeyStoreProcess.AddArgument(psi, path);
                 using (var p = System.Diagnostics.Process.Start(psi)) p?.WaitForExit(2000);
             }
             catch { /* hardening is best-effort */ }

@@ -99,7 +99,11 @@ namespace MCPForUnity.Editor.Tools.Build
                     : $"Build target group could not be resolved for target '{buildTarget}'.";
             }
 
+#if UNITY_2021_2_OR_NEWER
             namedTarget = NamedBuildTarget.FromBuildTargetGroup(targetGroup);
+#else
+            namedTarget = targetGroup;
+#endif
             return null;
         }
 

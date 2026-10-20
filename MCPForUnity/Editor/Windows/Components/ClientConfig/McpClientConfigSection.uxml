@@ -3,14 +3,11 @@
     <ui:VisualElement name="client-section" class="section">
         <ui:Label text="Client Configuration" class="section-title" />
         <ui:VisualElement class="section-content">
-            <ui:VisualElement class="setting-row">
-                <ui:Label text="Client:" class="setting-label" />
-                <ui:VisualElement name="client-dropdown" class="setting-dropdown-inline" />
-            </ui:VisualElement>
-            <ui:VisualElement class="setting-row">
-                <ui:VisualElement class="status-container">
-                    <ui:VisualElement name="client-status-indicator" class="status-dot" />
-                    <ui:Label name="client-status" text="Not Configured" class="status-text" />
+            <ui:Button name="configure-all-button" text="Configure Detected Clients" class="primary-button" />
+            <ui:Foldout name="client-details-foldout" text="Per-Client Configuration" value="true" class="client-details-foldout">
+                <ui:VisualElement class="setting-row">
+                    <ui:Label text="Client:" class="setting-label" />
+                    <ui:VisualElement name="client-dropdown" class="setting-dropdown-inline" />
                 </ui:VisualElement>
                 <ui:VisualElement class="setting-row">
                     <ui:VisualElement class="status-container">
